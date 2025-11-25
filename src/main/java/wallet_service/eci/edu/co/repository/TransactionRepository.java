@@ -59,4 +59,16 @@ public interface TransactionRepository extends MongoRepository<Transaction, Stri
      */
     List<Transaction> findByUserIdAndCreatedAtBetweenOrderByCreatedAtDesc(
         String userId, LocalDateTime startDate, LocalDateTime endDate);
+
+    /**
+     * Busca transacciones por bookingId
+     * @param bookingId ID de la reservación
+     * @return Lista de transacciones asociadas a la reservación
+     */
+    List<Transaction> findByBookingId(String bookingId);
+
+    /**
+     * Busca la transacción de un usuario por bookingId y tipo
+     */
+    Optional<Transaction> findFirstByBookingIdAndUserIdAndType(String bookingId, String userId, TransactionType type);
 }

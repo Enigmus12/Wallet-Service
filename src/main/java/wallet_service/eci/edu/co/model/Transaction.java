@@ -37,6 +37,9 @@ public class Transaction {
     private TransactionStatus status; // PENDING, COMPLETED, FAILED, CANCELLED
     
     private String metadata; // Información adicional en formato JSON (opcional)
+
+    @Indexed
+    private String bookingId; // ID de la reservación asociada (para transfer/refund)
     
     private LocalDateTime createdAt;
     

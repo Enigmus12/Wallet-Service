@@ -370,7 +370,7 @@ public class WalletService {
      * @param description Descripción de la transferencia
      * @return Map con el resultado de la operación
      */
-    public Map<String, Object> transferTokens(String fromUserId, String toUserId, Integer tokens, String description) {
+    public Map<String, Object> transferTokens(String fromUserId, String toUserId, Integer tokens, String description, String bookingId) {
         logger.info("transferTokens - from: {}, to: {}, tokens: {}", fromUserId, toUserId, tokens);
         
         // Construir IDs de wallet con roles
@@ -399,9 +399,10 @@ public class WalletService {
         
         // Crear transacción de uso para el estudiante (egreso)
         Transaction studentTransaction = Transaction.createUsage(
-            studentWalletUserId, studentWallet.getId(), tokens, 
+            studentWalletUserId, studentWallet.getId(), tokens,
             "Pago a tutor - " + description
         );
+        studentTransaction.setBookingId(bookingId);
         
         // Crear transacción de ingreso para el tutor
         Transaction tutorTransaction = new Transaction();
@@ -411,6 +412,7 @@ public class WalletService {
         tutorTransaction.setTokensAmount(tokens);
         tutorTransaction.setMoneyAmount(0.0);
         tutorTransaction.setDescription("Ingreso por tutoría - " + description);
+        tutorTransaction.setBookingId(bookingId);
         tutorTransaction.setStatus(Transaction.TransactionStatus.COMPLETED);
         tutorTransaction.setCreatedAt(LocalDateTime.now());
         tutorTransaction.setCompletedAt(LocalDateTime.now());
@@ -500,6 +502,83 @@ public class WalletService {
         return Map.of(
             "success", true,
             "message", "Tokens reembolsados exitosamente",
+            "studentUserId", studentUserId,
+            "tutorUserId", tutorUserId,
+            "tokensRefunded", tokens,
+            "studentNewBalance", studentWallet.getTokenBalance(),
+            "tutorNewBalance", tutorWallet.getTokenBalance()
+        );
+    }
+
+    /**
+     * Reembolsa tokens automáticamente con base en la reservación (bookingId).
+     * Busca la transacción de USAGE del estudiante para esa reservación y devuelve exactamente esos tokens.
+     */
+    public Map<String, Object> refundTokensByBooking(String studentUserId, String tutorUserId, String bookingId, String description) {
+        logger.info("refundTokensByBooking - studentUserId: {}, tutorUserId: {}, bookingId: {}", studentUserId, tutorUserId, bookingId);
+
+        String studentWalletUserId = studentUserId + "-student";
+        String tutorWalletUserId = tutorUserId + "-tutor";
+
+        Wallet studentWallet = walletRepository.findByUserId(studentWalletUserId)
+            .orElseThrow(() -> new RuntimeException("Wallet del estudiante no encontrada: " + studentWalletUserId));
+
+        Wallet tutorWallet = walletRepository.findByUserId(tutorWalletUserId)
+            .orElseThrow(() -> new RuntimeException("Wallet del tutor no encontrada: " + tutorWalletUserId));
+
+        // Obtener tokens usados originalmente por el estudiante para esta reservación
+        Transaction studentUsage = transactionRepository
+            .findFirstByBookingIdAndUserIdAndType(bookingId, studentWalletUserId, Transaction.TransactionType.USAGE)
+            .orElseThrow(() -> new RuntimeException("No se encontró la transacción de uso del estudiante para bookingId: " + bookingId));
+
+        Integer tokens = Optional.ofNullable(studentUsage.getTokensAmount()).orElse(0);
+        if (tokens <= 0) {
+            throw new RuntimeException("La transacción asociada no tiene tokens válidos para reembolso");
+        }
+
+        // Verificar que el tutor tenga suficientes tokens para devolver
+        if (!tutorWallet.useTokens(tokens)) {
+            throw new RuntimeException("El tutor no tiene suficientes tokens para devolver");
+        }
+
+        // Agregar tokens al estudiante
+        studentWallet.addTokens(tokens);
+
+        // Crear transacción de reembolso para el estudiante
+        Transaction studentRefundTransaction = new Transaction();
+        studentRefundTransaction.setUserId(studentWalletUserId);
+        studentRefundTransaction.setWalletId(studentWallet.getId());
+        studentRefundTransaction.setType(Transaction.TransactionType.REFUND);
+        studentRefundTransaction.setTokensAmount(tokens);
+        studentRefundTransaction.setMoneyAmount(0.0);
+        studentRefundTransaction.setDescription(description);
+        studentRefundTransaction.setStatus(Transaction.TransactionStatus.COMPLETED);
+        studentRefundTransaction.setCreatedAt(LocalDateTime.now());
+        studentRefundTransaction.setCompletedAt(LocalDateTime.now());
+        studentRefundTransaction.setBookingId(bookingId);
+
+        // Crear transacción de egreso para el tutor
+        Transaction tutorDeductionTransaction = new Transaction();
+        tutorDeductionTransaction.setUserId(tutorWalletUserId);
+        tutorDeductionTransaction.setWalletId(tutorWallet.getId());
+        tutorDeductionTransaction.setType(Transaction.TransactionType.USAGE);
+        tutorDeductionTransaction.setTokensAmount(tokens);
+        tutorDeductionTransaction.setMoneyAmount(0.0);
+        tutorDeductionTransaction.setDescription("Devolución por cancelación - " + description);
+        tutorDeductionTransaction.setStatus(Transaction.TransactionStatus.COMPLETED);
+        tutorDeductionTransaction.setCreatedAt(LocalDateTime.now());
+        tutorDeductionTransaction.setCompletedAt(LocalDateTime.now());
+        tutorDeductionTransaction.setBookingId(bookingId);
+
+        // Guardar cambios
+        walletRepository.save(studentWallet);
+        walletRepository.save(tutorWallet);
+        transactionRepository.save(studentRefundTransaction);
+        transactionRepository.save(tutorDeductionTransaction);
+
+        return Map.of(
+            "success", true,
+            "message", "Tokens reembolsados automáticamente",
             "studentUserId", studentUserId,
             "tutorUserId", tutorUserId,
             "tokensRefunded", tokens,
