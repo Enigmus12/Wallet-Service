@@ -127,8 +127,8 @@ public class WalletController {
         try {
             String fromUserId = (String) request.get("fromUserId"); // Estudiante que hace la reserva
             String toUserId = (String) request.get("toUserId"); // Tutor que recibe los tokens
-            Integer tokens = (Integer) request.get("tokens");
             String reservationId = (String) request.get("reservationId");
+            Integer tokens = (Integer) request.get("tokens");
             
             if (fromUserId == null || fromUserId.isEmpty()) {
                 return ResponseEntity.badRequest()
@@ -146,8 +146,11 @@ public class WalletController {
             }
             
             Map<String, Object> result = walletService.transferTokens(
-                fromUserId, toUserId, tokens, 
-                "Pago por reservación: " + reservationId
+                fromUserId,
+                toUserId,
+                tokens,
+                "Pago por reservación: " + reservationId,
+                reservationId
             );
             
             return ResponseEntity.ok(result);
@@ -161,19 +164,18 @@ public class WalletController {
      * Maneja cancelaciones tanto por estudiante como por tutor.
      */
     @PostMapping("/refund")
-    public ResponseEntity<?> refundOrTransferOnCancellation(Authentication authentication,
-                                                            @RequestBody Map<String, Object> request) {
+    public ResponseEntity<?> refundOnCancellation(Authentication authentication,
+                                                  @RequestBody Map<String, Object> request) {
         try {
             String fromUserId = (String) request.get("fromUserId"); // Estudiante
             String toUserId = (String) request.get("toUserId");     // Tutor
-            Integer tokens = (Integer) request.get("tokens");
             String reservationId = (String) request.get("reservationId");
             String cancelledBy = (String) request.get("cancelledBy");
             String reason = (String) request.getOrDefault("reason", "Cancelación de reservación");
 
-            if (tokens == null || tokens <= 0) {
+            if (reservationId == null || reservationId.isBlank()) {
                 return ResponseEntity.badRequest()
-                        .body(Map.of("error", "La cantidad de tokens debe ser mayor a 0"));
+                        .body(Map.of("error", "El 'reservationId' es requerido"));
             }
 
             if (cancelledBy == null || cancelledBy.isBlank()) {
@@ -191,22 +193,13 @@ public class WalletController {
                         .body(Map.of("error", "El ID del tutor ('toUserId') es requerido"));
             }
 
-            if ("STUDENT".equalsIgnoreCase(cancelledBy)) {
-                // Estudiante cancela: transfiere tokens del estudiante al tutor (penalización)
-                Map<String, Object> result = walletService.transferTokens(
+            if ("STUDENT".equalsIgnoreCase(cancelledBy) || "TUTOR".equalsIgnoreCase(cancelledBy)) {
+                // En cualquier cancelación se reembolsan los tokens automáticamente con base en la reserva
+                Map<String, Object> result = walletService.refundTokensByBooking(
                         fromUserId,
                         toUserId,
-                        tokens,
-                        reason + " - Cancelación por estudiante - Reservación: " + reservationId
-                );
-                return ResponseEntity.ok(result);
-            } else if ("TUTOR".equalsIgnoreCase(cancelledBy)) {
-                // Tutor cancela: reembolsa tokens al estudiante Y descuenta del tutor
-                Map<String, Object> result = walletService.refundTokens(
-                        fromUserId,  // estudiante (recibe)
-                        toUserId,    // tutor (pierde)
-                        tokens,
-                        reason + " - Cancelación por tutor - Reservación: " + reservationId
+                        reservationId,
+                        reason + " - Cancelación por " + cancelledBy + " - Reservación: " + reservationId
                 );
                 return ResponseEntity.ok(result);
             } else {
