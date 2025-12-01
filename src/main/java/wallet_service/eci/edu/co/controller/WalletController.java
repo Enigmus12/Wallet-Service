@@ -11,8 +11,6 @@ import wallet_service.eci.edu.co.model.Transaction;
 import wallet_service.eci.edu.co.model.Wallet;
 import wallet_service.eci.edu.co.service.WalletService;
 import wallet_service.eci.edu.co.util.CognitoTokenDecoder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,8 +20,6 @@ import java.util.Map;
 @RequestMapping("/api/wallet")
 @CrossOrigin(origins = "*")
 public class WalletController {
-    
-    private static final Logger logger = LoggerFactory.getLogger(WalletController.class);
     
     private final WalletService walletService;
     private final CognitoTokenDecoder tokenDecoder;
