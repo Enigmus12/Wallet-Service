@@ -25,7 +25,7 @@ jobs:
           distribution: 'microsoft'
 
       - name: Build with Maven
-        run: mvn clean install -DskipTests
+        run: mvn clean install
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -49,9 +49,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_0A2A127C6208427B9862A353A7356E82 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EFCD3251F6194C9E995D333249159CBC }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D83A58E519B04EB1A9EAB47F7011DF90 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_6D80836D178A4C35B190EDC446794345 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D709C67C02AA44B9B5C905A75809AA48 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7C6151AE64064F2DB77C873E6F3F8E0D }}
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
@@ -60,5 +60,4 @@ jobs:
           app-name: 'WalletService'
           slot-name: 'Production'
           package: '*.jar'
-
           
