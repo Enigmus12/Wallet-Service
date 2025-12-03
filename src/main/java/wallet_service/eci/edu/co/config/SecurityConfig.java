@@ -32,6 +32,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // Permitir solicitudes OPTIONS (preflight CORS)
+                .requestMatchers(request -> "OPTIONS".equals(request.getMethod())).permitAll()
                 // Endpoints públicos
                 .requestMatchers("/api/stripe/public-key").permitAll()
                 .requestMatchers("/api/stripe/webhook/**").permitAll()
