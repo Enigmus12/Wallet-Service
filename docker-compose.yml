@@ -1,0 +1,11 @@
+services:
+  wallet-service:
+    image: wallet-service:latest
+    container_name: wallet-service
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    environment:
+      - SPRING_PROFILES_ACTIVE=production
+    env_file:
+      - .env
