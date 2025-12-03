@@ -1,23 +1,33 @@
-# syntax=docker/dockerfile:1
+# Build stage
+FROM maven:3.9-eclipse-temurin-17 AS build
 
-FROM maven:3.9.9-eclipse-temurin-17 AS build
 WORKDIR /app
 
-# Cache deps
+# Copy pom.xml first to cache dependencies
 COPY pom.xml .
-RUN mvn -B -q -e -DskipTests dependency:go-offline
 
-# Build
+# Download dependencies
+RUN mvn dependency:go-offline -B
+
+# Copy source code
 COPY src ./src
-RUN mvn -B -q -DskipTests package
 
+# Build the application
+RUN mvn clean package -DskipTests
 
-FROM eclipse-temurin:17-jre AS runtime
+# Production stage
+FROM eclipse-temurin:17-jre-alpine
+
 WORKDIR /app
 
-# Copy the fat jar
-COPY --from=build /app/target/*.jar /app/app.jar
+# Copy the built jar from build stage
+COPY --from=build /app/target/*.jar app.jar
 
+# Copy environment variables
+COPY .env .env
+
+# Expose port 8081
 EXPOSE 8081
 
-ENTRYPOINT ["java","-jar","/app/app.jar"]
+# Run the application
+ENTRYPOINT ["java", "-jar", "app.jar"]

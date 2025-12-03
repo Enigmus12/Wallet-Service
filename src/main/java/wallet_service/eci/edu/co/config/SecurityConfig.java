@@ -32,6 +32,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // Permitir solicitudes OPTIONS (preflight CORS)
+                .requestMatchers(request -> "OPTIONS".equals(request.getMethod())).permitAll()
                 // Endpoints públicos
                 .requestMatchers("/api/stripe/public-key").permitAll()
                 .requestMatchers("/api/stripe/webhook/**").permitAll()
@@ -53,10 +55,15 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("*")); // En producción, especifica los dominios permitidos
+        configuration.setAllowedOrigins(Arrays.asList(
+            "https://uplearnfront.duckdns.org",
+            "http://localhost:3000",
+            "http://localhost:5173"
+        ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
-        configuration.setAllowCredentials(false);
+        configuration.setAllowCredentials(true);
+        configuration.setExposedHeaders(Arrays.asList("Authorization"));
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

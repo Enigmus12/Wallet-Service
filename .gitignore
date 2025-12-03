@@ -36,3 +36,8 @@ build/
 .env
 env.properties
 *.env
+
+
+*.tar
+*.zip
+*.bin
