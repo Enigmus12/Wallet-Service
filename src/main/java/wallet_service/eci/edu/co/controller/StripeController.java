@@ -1,6 +1,7 @@
 package wallet_service.eci.edu.co.controller;
 
 import java.util.Map;
+import jakarta.annotation.PostConstruct;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -21,25 +22,34 @@ import wallet_service.eci.edu.co.service.WalletService;
 @CrossOrigin(origins = "*")
 public class StripeController {
     private static final Logger logger = LoggerFactory.getLogger(StripeController.class);
+    private static final String STATUS_SUCCESS = "success";
+    private static final String MESSAGE = "message";
+    private static final String ERROR = "error";
 
     private final StripeService stripeService;
     private final WalletService walletService;
+
+    @Value("${stripe.publicKey}")
+    private String publicKey;
+
+    @Value("${stripe.secretKey}")
+    private String secretKey;
 
     public StripeController(StripeService stripeService, WalletService walletService) {
         this.stripeService = stripeService;
         this.walletService = walletService;
     }
 
-    @Value("${stripe.publicKey}")
-    private String publicKey;
-    
-    @Value("${stripe.secretKey}")
-    private String secretKey;
+    @PostConstruct
+    public static void init() {
+        Stripe.apiKey = System.getProperty("stripe.secretKey");
+    }
 
     @PostMapping("/checkout")
-    public ResponseEntity<StripeResponse> createCheckout(@RequestBody ProductRequest request, 
-                                                         Authentication authentication) {
-        // Permitir prueba sin autenticación: si authentication es null usar un userId dummy
+    public ResponseEntity<StripeResponse> createCheckout(@RequestBody ProductRequest request,
+            Authentication authentication) {
+        // Permitir prueba sin autenticación: si authentication es null usar un userId
+        // dummy
         String userId = (authentication != null) ? authentication.getName() : "TEST_USER";
         StripeResponse response = stripeService.createCheckoutSession(request, userId);
         return ResponseEntity.ok(response);
@@ -54,31 +64,28 @@ public class StripeController {
     @GetMapping("/success")
     public Map<String, Object> success(@RequestParam(name = "session_id", required = false) String sessionId) {
         return Map.of(
-            "status", "success",
-            "sessionId", sessionId
-        );
+                "status", STATUS_SUCCESS,
+                "sessionId", sessionId);
     }
 
     // Página de cancelación llamada por Stripe (pública)
     @GetMapping("/cancel")
     public Map<String, Object> cancel() {
         return Map.of(
-            "status", "canceled",
-            "message", "Pago cancelado por el usuario"
-        );
+                "status", "canceled",
+                MESSAGE, "Pago cancelado por el usuario");
     }
-    
+
     /**
      * Endpoint para confirmar el pago después de que el usuario regrese de Stripe
      * El frontend debe llamar este endpoint con el session_id
      */
     @PostMapping("/confirm-payment")
-    public ResponseEntity<?> confirmPayment(@RequestBody Map<String, String> payload) {
+    public ResponseEntity<Object> confirmPayment(@RequestBody Map<String, String> payload) {
         try {
             String rawSessionId = payload.get("sessionId");
             logger.info("Confirmando pago. Valor recibido sessionId raw: {}", rawSessionId);
             if (rawSessionId != null) {
-                // El fragmento (#...) nunca se envía al backend; si viene incluido por error, lo removemos
                 int hashIndex = rawSessionId.indexOf('#');
                 if (hashIndex != -1) {
                     logger.debug("Detectado fragmento en sessionId, recortando en posición {}", hashIndex);
@@ -87,83 +94,60 @@ public class StripeController {
             }
             String sessionId = (rawSessionId != null) ? rawSessionId.trim() : null;
             logger.info("SessionId normalizado: {}", sessionId);
-            
-            if (sessionId == null || sessionId.isEmpty()) {
-                return ResponseEntity.badRequest()
-                    .body(Map.of("error", "sessionId es requerido"));
-            }
-            
-            // Configurar Stripe
-            Stripe.apiKey = secretKey;
-            
+
             // Obtener la sesión de Stripe
             Session session = Session.retrieve(sessionId);
-            logger.info("Session recuperada. Status: {}, Payment Status: {}", 
-                session.getStatus(), session.getPaymentStatus());
-            
-            // Verificar que el pago fue exitoso
-            if (!"complete".equals(session.getStatus()) || 
-                !"paid".equals(session.getPaymentStatus())) {
-                logger.warn("Pago no completado. Status: {}, Payment Status: {}", 
+
+            logger.info("Session recuperada. Status: {}, Payment Status: {}",
                     session.getStatus(), session.getPaymentStatus());
+
+            // Verificar que el pago fue exitoso
+            if (!"complete".equals(session.getStatus()) ||
+                    !"paid".equals(session.getPaymentStatus())) {
+                logger.warn("Pago no completado. Status: {}, Payment Status: {}",
+                        session.getStatus(), session.getPaymentStatus());
                 return ResponseEntity.badRequest()
-                    .body(Map.of("error", "El pago no ha sido completado"));
+                        .body(Map.of(ERROR, "El pago no ha sido completado"));
             }
-            
             // Obtener metadata
             Map<String, String> metadata = session.getMetadata();
             String userId = metadata.get("userId");
             String tokensStr = metadata.get("tokens");
             String tokenPriceStr = metadata.get("tokenPrice");
-            
-            logger.info("Metadata - userId: {}, tokens: {}, tokenPrice: {}", 
-                userId, tokensStr, tokenPriceStr);
-            
+
+            logger.info("Metadata - userId: {}, tokens: {}, tokenPrice: {}",
+                    userId, tokensStr, tokenPriceStr);
+
             if (userId == null || tokensStr == null || tokenPriceStr == null) {
                 return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Metadata incompleta en la sesión"));
+                        .body(Map.of(ERROR, "Metadata incompleta en la sesión"));
             }
-            
-            Integer tokens = Integer.parseInt(tokensStr);
+            int tokens = Integer.parseInt(tokensStr);
             Double tokenPrice = Double.parseDouble(tokenPriceStr);
             Double amount = tokens * tokenPrice;
-            
-            // Verificar si ya fue procesado
-            if (walletService.findTransactionByStripeSession(sessionId).isPresent()) {
-                logger.info("Pago ya procesado anteriormente para session: {}", sessionId);
-                return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "message", "Pago ya procesado anteriormente",
-                    "alreadyProcessed", true
-                ));
-            }
-            
+
             // Asegurar que la wallet existe
             logger.info("Verificando/creando wallet para userId: {}", userId);
             walletService.getOrCreateWallet(userId, "");
-            
+
             // Procesar la compra en la wallet
-            logger.info("Procesando compra - userId: {}, tokens: {}, amount: {}", 
-                userId, tokens, amount);
+            logger.info("Procesando compra - userId: {}, tokens: {}, amount: {}",
+                    userId, tokens, amount);
             walletService.processPurchase(userId, tokens, amount, sessionId);
-            
-            logger.info("Pago procesado exitosamente para session: {}", sessionId);
             return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "Pago procesado exitosamente",
-                "tokens", tokens,
-                "amount", amount
-            ));
+                    STATUS_SUCCESS, true,
+                    MESSAGE, "Pago procesado exitosamente",
+                    "tokens", tokens,
+                    "amount", amount));
         } catch (Exception e) {
-            logger.error("Error al confirmar pago", e);
             return ResponseEntity.badRequest()
-                .body(Map.of("error", "Error al procesar el pago: " + e.getMessage()));
+                    .body(Map.of(ERROR, "Error al procesar el pago: " + e.getMessage()));
         }
     }
-    
+
     @PostMapping("/webhook")
-    public ResponseEntity<?> handleStripeWebhook(@RequestBody String payload,
-                                                  @RequestHeader(value = "Stripe-Signature", required = false) String sigHeader) {
+    public ResponseEntity<Void> handleStripeWebhook(@RequestBody String payload,
+            @RequestHeader(value = "Stripe-Signature", required = false) String sigHeader) {
         logger.info("Webhook recibido de Stripe");
         logger.debug("Payload: {}", payload);
         return ResponseEntity.ok().build();
