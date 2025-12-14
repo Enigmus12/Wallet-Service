@@ -1,6 +1,12 @@
 package wallet_service.eci.edu.co.service;
 
+import java.util.HashMap;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 import com.stripe.Stripe;
 import com.stripe.exception.StripeException;
@@ -10,40 +16,33 @@ import com.stripe.param.checkout.SessionCreateParams;
 import wallet_service.eci.edu.co.dto.ProductRequest;
 import wallet_service.eci.edu.co.dto.StripeResponse;
 
-import java.util.HashMap;
-import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+@Service // ✅ clave: ahora Spring lo detecta y lo puede inyectar en StripeController
 public class StripeService {
 
     private static final Logger logger = LoggerFactory.getLogger(StripeService.class);
     private static final String CHECKOUT_SESSION_ID_PLACEHOLDER = "{CHECKOUT_SESSION_ID}";
-    private static final String USER_ID_LOG_MESSAGE = "🔍 Usuario (metadata userId): {}";
-    private static final String REDIRECT_LOG_MESSAGE = "🔁 Redirige a (cuando COMPLETE/PAGADO): {}";
+    private final String successUrl;
+    private final String cancelUrl;
 
-    @Value("${stripe.secretKey}")
-    private String secretKey;
-
-    @Value("${stripe.successUrl}")
-    private String successUrl;
-
-    @Value("${stripe.cancelUrl}")
-    private String cancelUrl;
-
-    public static StripeResponse createCheckoutSession(ProductRequest request, String userId, String secretKey,
-            String successUrl, String cancelUrl) {
+    public StripeService(
+            @Value("${stripe.secretKey}") String secretKey,
+            @Value("${stripe.successUrl}") String successUrl,
+            @Value("${stripe.cancelUrl}") String cancelUrl) {
+        this.successUrl = successUrl;
+        this.cancelUrl = cancelUrl;
         Stripe.apiKey = secretKey;
+    }
+    public StripeResponse createCheckoutSession(ProductRequest request, String userId) {
 
         try {
             String finalSuccessUrl = buildFinalSuccessUrl(successUrl);
-            logConfiguredUrls(successUrl, finalSuccessUrl, cancelUrl, userId);
 
-            long quantity = request.getQuantity() == null ? 1L : request.getQuantity();
-            String currency = request.getCurrency() == null ? "cop" : request.getCurrency().toLowerCase();
-            String name = request.getName() == null ? "Token" : request.getName();
+            long quantity = (request.getQuantity() == null) ? 1L : request.getQuantity();
+            String currency = (request.getCurrency() == null) ? "cop" : request.getCurrency().toLowerCase();
+            String name = (request.getName() == null) ? "Token" : request.getName();
 
-            long unitAmount = 200000L; // 2000 COP por token
+            // ✅ Si quieres 2000 COP por token, en COP el unitAmount suele ser en COP (sin centavos)
+            long unitAmount = 2000L;
 
             Map<String, String> metadata = new HashMap<>();
             metadata.put("userId", userId);
@@ -67,54 +66,25 @@ public class StripeService {
                                     .build())
                             .build())
                     .build();
+
             Session session = Session.create(params);
+
             logger.info("✅ Checkout Session creada: ID={}", session.getId());
-            logRedirectUrl(finalSuccessUrl, session.getId());
-            logger.info("✅ Checkout Session creada: ID={}", session.getId());
-            logger.info("➡️  URL de pago Stripe (abrir en navegador): {}", session.getUrl());
-            logRedirectUrl(finalSuccessUrl, session.getId());
+            logger.info("➡️  URL de pago Stripe: {}", session.getUrl());
+            if (logger.isInfoEnabled()) {
+                logger.info("🔁 Redirige a: {}", finalSuccessUrl.replace(CHECKOUT_SESSION_ID_PLACEHOLDER, session.getId()));
+            }
+
             return new StripeResponse("success", "Checkout session created", session.getId(), session.getUrl());
         } catch (StripeException e) {
+            logger.error("❌ Error creando checkout session: {}", e.getMessage(), e);
             return new StripeResponse("error", e.getMessage(), null, null);
         }
     }
 
     private static String buildFinalSuccessUrl(String successUrl) {
         String urlSeparator = successUrl.contains("?") ? "&" : "?";
-        if (successUrl.contains(CHECKOUT_SESSION_ID_PLACEHOLDER)) {
-            return successUrl;
-        } else {
-            return successUrl + urlSeparator + "session_id=" + CHECKOUT_SESSION_ID_PLACEHOLDER;
-        }
-    }
-
-    private static void logConfiguredUrls(String successUrl, String finalSuccessUrl, String cancelUrl, String userId) {
-        logger.info("🔍 SUCCESS URL (config): {}", successUrl);
-        logger.info("🔍 SUCCESS URL (final usada en Stripe): {}", finalSuccessUrl);
-        logger.info(USER_ID_LOG_MESSAGE, userId);
-        logger.info("🔍 CANCEL URL:  {}", cancelUrl);
-    }
-
-    private static void logRedirectUrl(String finalSuccessUrl, String sessionId) {
-        if (finalSuccessUrl != null) {
-            if (finalSuccessUrl.contains(CHECKOUT_SESSION_ID_PLACEHOLDER)) {
-                if (sessionId != null) {
-                    if (logger.isInfoEnabled()) {
-                        logger.info(REDIRECT_LOG_MESSAGE,
-                                finalSuccessUrl.replace(CHECKOUT_SESSION_ID_PLACEHOLDER, sessionId));
-                    }
-                } else {
-                    logger.info(REDIRECT_LOG_MESSAGE, finalSuccessUrl);
-                }
-            } else {
-                logger.info(REDIRECT_LOG_MESSAGE, finalSuccessUrl);
-            }
-        } else {
-            logger.info(REDIRECT_LOG_MESSAGE, "Final success URL is null");
-        }
-    }
-
-    public StripeResponse createCheckoutSession(ProductRequest request, String userId) {
-        return createCheckoutSession(request, userId, secretKey, successUrl, cancelUrl);
+        if (successUrl.contains(CHECKOUT_SESSION_ID_PLACEHOLDER)) return successUrl;
+        return successUrl + urlSeparator + "session_id=" + CHECKOUT_SESSION_ID_PLACEHOLDER;
     }
 }
